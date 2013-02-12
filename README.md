@@ -1,7 +1,4 @@
-shell_completions
-=================
-
-A small Python script that returns the list of command-line tab completions.
+This is a small Python script that returns the list of command-line tab completions.
 
 Usage
 -----
