@@ -1,4 +1,5 @@
-This is a small Python script that returns the list of command-line tab completions.
+This is a small Python script that returns the list of command-line tab completions
+for an input string.
 
 Usage
 -----
