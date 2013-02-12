@@ -6,21 +6,23 @@ import argparse, pexpect, sys
 COMPLETIONS_COMMAND = ". /etc/bash_completion"
 BIGLIST_WARNING = "(y or n)"
 NEXT_PAGE_INDICATOR = "--More--"
+DEFAULT_TIMEOUT=2
+DEFAULT_SHELL="bash"
 
 
 def print_string(message, string):
     print message + " \"" + string + "\""
 
 
-def completions(partial_command, command="bash", return_raw=False, 
-                import_completions=True, get_prompt=True, timeout=2, 
-                biglist=True, verbose=False):
+def completions(partial_command, shell=DEFAULT_SHELL, return_raw=False, 
+                import_completions=True, get_prompt=True, 
+                timeout=DEFAULT_TIMEOUT, biglist=True, verbose=False):
     """
     Returns a list containing the tab completions found by the shell for the 
     input string.
     """
 
-    child = pexpect.spawn(command, timeout=timeout)
+    child = pexpect.spawn(shell, timeout=timeout)
 
     if verbose:
         child.logfile = sys.stdout
@@ -97,11 +99,34 @@ if __name__ == "__main__":
     parser.add_argument("COMMAND", type=str,
                         help="The partial command that the shell should attempt to complete.")
 
-    parser.add_argument("--separator", default="\n",
+    parser.add_argument("--no_biglists", action="store_false", default=True,
+                        help="Abort execution if the shell finds a large number of completions.")
+
+    parser.add_argument("--no_detect_prompt", action="store_false", default=True,
+                        help="Don't attempt to detect the command prompt, and use a built-in constant instead. This should speed up execution times.")
+
+    parser.add_argument("--no_import_completions", default=True,
+                        help="Don't set up completions by running the script at /etc/completions.")
+    parser.add_argument("--raw", action="store_false", default=False,
+                        help="Returns all output from the shell without formatting changes.")
+
+    parser.add_argument("--separator", "-s", default="\n",
                         help="Character used to separate the list of completions.")
+
+    parser.add_argument("--shell", default="bash",
+                        help="The shell to query for completions. Defaults to bash.")
+
+    parser.add_argument("--timeout", "-t", metavar="SECONDS", type=float, default=DEFAULT_TIMEOUT,
+                        help="The time in seconds before the program detects no shell output.")
+
+    parser.add_argument("--verbose", "-v", action="store_true", default=False,
+                        help="Verbose mode.")
+
 
     args = parser.parse_args()
 
-    completion_list = completions(args.COMMAND)
+    completion_list = completions(args.COMMAND, verbose=args.verbose, 
+        return_raw=args.raw, get_prompt=args.no_detect_prompt, 
+        timeout=args.timeout, biglist=args.no_biglists)
 
     print str(args.separator).join(completion_list)
