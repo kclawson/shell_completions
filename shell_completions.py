@@ -1,7 +1,13 @@
 #!/usr/bin/env python
 
-import argparse, pexpect, sys
+# Known bugs/oddities:
+#   [ ] Fails to correctly detect the prompt with certain .bashrc settings.
+#   [X] Spurious empty strings/escape sequences appear with multi-page output.
+#   [ ] Output is not consistent. Example: 'git stat' returns 'git status', while
+#       'git sta' returns a list of completions only for the 'sta' part of the 
+#       command.
 
+import argparse, pexpect, sys
 
 COMPLETIONS_COMMAND = ". /etc/bash_completion"
 BIGLIST_WARNING = "(y or n)"
@@ -15,8 +21,9 @@ def print_string(message, string):
 
 
 def completions(partial_command, shell=DEFAULT_SHELL, return_raw=False, 
-                import_completions=True, get_prompt=True, 
-                timeout=DEFAULT_TIMEOUT, biglist=True, verbose=False):
+                import_completions=True, get_prompt=True, prompt="$ ",
+                timeout=DEFAULT_TIMEOUT, biglist=True, verbose=False,
+                logfile=None):
     """
     Returns a list containing the tab completions found by the shell for the 
     input string.
@@ -27,17 +34,34 @@ def completions(partial_command, shell=DEFAULT_SHELL, return_raw=False,
     if verbose:
         child.logfile = sys.stdout
 
-    #### NOTE: It would be nice to disable the echo, but for some reason things
-    ####       go haywire without it.
-    # child.setecho(False)
+    if logfile is not None:
+        logfile = open(logfile, "w")
+        child.logfile = logfile 
+
+    # We want to echo characters sent to the shell so that new prompts print
+    # on their own line.
+    child.setecho(True)
+
+    # echo_on = child.getecho()
+    # if verbose:
+    #    print "Echo state: " + str(echo_on)
 
     # Get a bare command prompt in order to find the end of the
     # list of completions.
     if get_prompt:
+
+        # !!!
+        # Here we assume that the shell will only print out a command
+        # prompt on startup. This is not always true.
+        # !!!
         child.sendline()
         child.expect_exact("\r\n")
-        child.expect_exact("\r\n")
         prompt = child.before
+
+        # We just hit enter, so we expect the shell to print a new prompt and
+        # we need to clear it out of the buffer.
+        child.expect_exact(prompt)
+
         if verbose:
             print_string("Prompt:", prompt)
 
@@ -45,11 +69,11 @@ def completions(partial_command, shell=DEFAULT_SHELL, return_raw=False,
     if import_completions:
         child.sendline(COMPLETIONS_COMMAND)
         child.expect_exact(prompt)
-        child.expect_exact(prompt)
 
     child.send(partial_command + "\t\t")
     child.expect_exact(partial_command)
     #### NOTE: I don't understand why this time we don't get an echo.
+    ####       New idea: Of course... it's only echoing the sent characters.
     # child.expect_exact(partial_command)
 
     index = child.expect_exact([" ", "\r\n", pexpect.TIMEOUT])
@@ -57,24 +81,41 @@ def completions(partial_command, shell=DEFAULT_SHELL, return_raw=False,
     if index == 0:
         # Bash found a single completion and filled it in.
         return [partial_command + child.before]
+
     elif index == 1:
-        index = child.expect_exact([BIGLIST_WARNING, prompt])
-        if index == 0:
-            # Shell found many possibilities and asks whether to continue.
+        index = child.expect_exact([BIGLIST_WARNING, NEXT_PAGE_INDICATOR, prompt])
+        if index == 0 or index == 1:
+            # The shell found too many completions to list on one screen.
             if biglist:
-                child.send("y")
                 completions = ""
+
+                # For very long lists the shell asks whether to continue.
+                if index == 0:
+                    child.send("y")
+                
+                # Shorter lists print to the screen without asking. 
+                else:
+                    completions += child.before
+                    child.send(" ")
+                
+                # Keep sending space to get more pages until we get back to the 
+                # command prompt.
                 while True:
-                    index = child.expect_exact([prompt, NEXT_PAGE_INDICATOR])
+                    index = child.expect_exact([NEXT_PAGE_INDICATOR, prompt])
+                    completions += child.before
                     if index == 0:
-                        break
-                    elif index == 1:
-                        completions += child.before
                         child.send(" ")
-        elif index == 1:
+                    elif index == 1:
+                        break
+                
+                # Remove spurious escape sequence.
+                completions = completions.replace("\x1b[K", "")
+
+        elif index == 2:
             # Bash found more than one completion and listed them on multiple lines.
             # child.expect_exact(prompt)
             completions = child.before
+ 
     elif index == 2:
         # If the command timed out, either no completion was found or it
         # found a single completion witout adding a space (for instance, this 
@@ -122,11 +163,13 @@ if __name__ == "__main__":
     parser.add_argument("--verbose", "-v", action="store_true", default=False,
                         help="Verbose mode.")
 
+    parser.add_argument("--log", "-l", metavar="LOGFILE", default=None,
+                        help="Log all shell output to file named LOGFILE.")
 
     args = parser.parse_args()
 
     completion_list = completions(args.COMMAND, verbose=args.verbose, 
         return_raw=args.raw, get_prompt=args.no_detect_prompt, 
-        timeout=args.timeout, biglist=args.no_biglists)
+        timeout=args.timeout, biglist=args.no_biglists, logfile=args.log)
 
     print str(args.separator).join(completion_list)
